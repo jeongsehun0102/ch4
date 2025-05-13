@@ -1,0 +1,19 @@
+// tsconfig.json
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts",
+    "images.d.ts" // <--- 이 부분을 추가합니다. (파일 이름이 다르다면 맞게 수정)
+  ]
+}
