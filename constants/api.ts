@@ -9,7 +9,6 @@ export const API_ENDPOINTS = {
   // 인증 관련
   LOGIN: '/api/auth/login',
   SIGNUP: '/api/auth/signup',
-  192.168.45.228
   // 질문 관련
   GET_QUESTION: '/api/questions/for-me',
 
