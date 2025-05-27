@@ -2,7 +2,7 @@
 
 // 앱이 통신할 백엔드 서버의 기본 주소입니다.
 // 만약 로컬에서 테스트 중이라면, PC의 IP 주소와 Spring Boot 서버의 포트 번호를 사용합니다.
-export const API_BASE_URL = 'http://?.?.?.? :8080'; // ❗ 본인의 실제 PC IP 주소로 변경해주세요!
+export const API_BASE_URL = 'http://220.67.0.120:8080'; // ❗ 본인의 실제 PC IP 주소로 변경해주세요!
 
 // API 기능별 상세 주소(엔드포인트)들을 모아둔 객체입니다.
 export const API_ENDPOINTS = {
