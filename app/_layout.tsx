@@ -1,60 +1,66 @@
 // app/_layout.tsx
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { SplashScreen as ExpoSplashScreen, router, Stack } from 'expo-router';
+import { SplashScreen as ExpoSplashScreen, router, Stack } from 'expo-router'; // router 임포트 확인
 import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native'; // Text, StyleSheet import 추가
+import { StyleSheet, Text, View } from 'react-native';
 import 'react-native-reanimated';
 
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
-// 스플래시 화면 자동 숨기기 방지
 ExpoSplashScreen.preventAutoHideAsync();
 
-// 간단한 로딩 스피너 대신 사용할 임시 로딩 뷰 스타일
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#ffffff', // 혹은 테마에 맞는 배경색
+    backgroundColor: '#ffffff',
   },
   loadingText: {
     fontSize: 16,
     marginTop: 10,
-    color: '#000000', // 혹은 테마에 맞는 글자색
+    color: '#000000',
   }
 });
 
-// RootNavigation 컴포넌트: useAuth를 사용하기 위해 AuthProvider 내부에 위치
 function RootNavigation() {
-  const { isAuthenticated, isLoading, token } = useAuth(); // AuthContext 사용
+  const { isAuthenticated, isLoading, token } = useAuth();
 
   const onLayoutRootView = useCallback(async () => {
-    // isLoading (AuthContext 로딩)과 폰트 로딩 상태를 함께 고려하여 스플래시 숨김
-    // (이 부분은 RootLayout의 폰트 로딩 완료 후 RootNavigation이 렌더링되므로,
-    //  여기서는 AuthContext의 isLoading만으로도 충분할 수 있습니다.)
     if (!isLoading) {
-      await ExpoSplashScreen.hideAsync(); // 스플래시 화면 숨기기
+      console.log('RootNavigation: onLayoutRootView - Auth loading complete, hiding splash screen.');
+      await ExpoSplashScreen.hideAsync();
     }
   }, [isLoading]);
 
   useEffect(() => {
     if (!isLoading) {
-      if (isAuthenticated) {
-        console.log('RootNavigation: User is authenticated, navigating to (tabs). Token:', token);
-        router.replace('/(tabs)');
-      } else {
-        console.log('RootNavigation: User is not authenticated, navigating to /login.');
-        router.replace('/login');
-      }
+      // setTimeout을 사용하여 네비게이션 액션을 다음 이벤트 루프 틱으로 지연
+      const timerId = setTimeout(() => {
+        if (isAuthenticated) {
+          console.log('RootNavigation (useEffect): User is authenticated, navigating to (tabs). Token:', token);
+          // 이전 스택을 정리하고 replace (선택적이지만 초기 라우팅에 도움될 수 있음)
+          // if (router.canGoBack()) {
+          //   router.dismissAll();
+          // }
+          router.replace('/(tabs)');
+        } else {
+          console.log('RootNavigation (useEffect): User is not authenticated, navigating to /login.');
+          // if (router.canGoBack()) {
+          //   router.dismissAll();
+          // }
+          router.replace('/login');
+        }
+      }, 0); // 0ms 지연. 문제가 지속되면 10-50ms로 늘려보세요.
+
+      return () => clearTimeout(timerId); // useEffect cleanup 함수에서 타이머 제거
     }
-  }, [isAuthenticated, isLoading, token]);
+  }, [isAuthenticated, isLoading, token]); // 의존성 배열은 동일하게 유지
 
   if (isLoading) {
-    // AuthContext 로딩 중일 때 로딩 UI 표시
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>사용자 정보 확인 중...</Text>
@@ -62,13 +68,14 @@ function RootNavigation() {
     );
   }
 
-  // 인증 상태가 확정된 후에 Stack 네비게이터를 렌더링
+  // Stack 네비게이터가 onLayoutRootView 이후에 안정적으로 렌더링되도록 함
   return (
     <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
       <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="login" />
-        <Stack.Screen name="signup" />
-        <Stack.Screen name="(tabs)" />
+        {/* 초기 화면 전환 애니메이션 제거 옵션 (선택 사항) */}
+        <Stack.Screen name="login" options={{ animation: 'none' }} />
+        <Stack.Screen name="signup" options={{ animation: 'none' }} />
+        <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
         <Stack.Screen name="+not-found" />
       </Stack>
     </View>
@@ -77,24 +84,21 @@ function RootNavigation() {
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
-  const [loaded, fontError] = useFonts({ // 변수명을 error에서 fontError로 변경 (혼동 방지)
+  const [loaded, fontError] = useFonts({
     SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
   });
 
-  // 폰트 로딩 에러 처리
   useEffect(() => {
     if (fontError) {
       console.error("Font loading error:", fontError);
-      // 폰트 로딩 실패 시에도 스플래시를 숨길 수 있지만, 일단은 로딩 UI를 계속 보여주거나 에러 UI를 표시
-      // ExpoSplashScreen.hideAsync();
     }
   }, [fontError]);
 
-  // AuthContext의 isLoading을 여기서 직접 사용하진 않지만,
-  // RootNavigation이 AuthProvider 내부에 있으므로 해당 컴포넌트에서 처리합니다.
-  // 여기서는 폰트 로딩 상태만 우선적으로 처리합니다.
+  // 폰트 로딩이 완료될 때까지 스플래시 화면 유지 (RootNavigation의 onLayoutRootView에서 숨김 처리)
   if (!loaded && !fontError) {
-    // 폰트 로딩 중일 때 로딩 UI 표시
+    // 폰트가 로딩 중일 때는 스플래시 화면이 계속 보이도록 아무것도 반환하지 않거나,
+    // 최소한의 로딩 UI (또는 null)를 반환하여 스플래시가 가려지지 않도록 할 수 있습니다.
+    // 여기서는 RootNavigation에서 스플래시를 숨기므로, 폰트 로딩 중에는 로딩 UI를 보여줍니다.
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>폰트 로딩 중...</Text>
@@ -102,9 +106,7 @@ export default function RootLayout() {
     );
   }
 
-  // 폰트 로딩에 실패했지만, 앱을 계속 진행하고 싶다면 여기서 별도 처리가능
-  // (예: 기본 폰트로 앱을 띄우거나, 에러 메시지 UI를 보여주거나)
-  if (fontError && !loaded) { // 폰트 로딩 에러가 발생했고, 로드되지 않았다면
+  if (fontError && !loaded) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>폰트 로딩 실패! 앱을 시작할 수 없습니다.</Text>
@@ -112,7 +114,6 @@ export default function RootLayout() {
     );
   }
 
-  // 폰트 로딩이 완료되었거나, (에러가 발생했더라도) 로드가 일부 성공하여 진행 가능할 때
   return (
     <AuthProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
