@@ -10,6 +10,8 @@ import React, {
   useEffect,
   useState,
 } from 'react';
+// Alert를 사용하기 위해 react-native에서 import 합니다.
+import { Alert } from 'react-native'; // <--- Alert 추가
 import { API_BASE_URL, API_ENDPOINTS } from '../constants/api';
 
 // SecureStore에 사용될 키 정의
@@ -57,7 +59,6 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     const currentAccessToken = await SecureStore.getItemAsync(TOKEN_KEY);
     const currentRefreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
 
-    // 이미 로그아웃 상태이거나 토큰이 없는 경우 중복 처리 방지
     if (!currentAccessToken && !currentRefreshToken && !token) {
         console.log('AuthContext: No tokens found, logout process likely already completed or not needed.');
         if (!suppressRedirect && pathname !== '/login') {
@@ -72,49 +73,54 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     try {
       await SecureStore.deleteItemAsync(TOKEN_KEY);
       await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
-      setToken(null); // Context 상태 업데이트
-      delete axios.defaults.headers.common['Authorization']; // Axios 헤더에서 토큰 제거
+      setToken(null);
+      delete axios.defaults.headers.common['Authorization'];
       console.log('AuthContext: Tokens deleted, user logged out.');
       if (!suppressRedirect) {
         console.log('AuthContext: Redirecting to login.');
-        router.replace('/login'); // 로그인 화면으로 리다이렉트
+        router.replace('/login');
       }
     } catch (e) {
       console.error('AuthContext: Failed to execute logout', e);
-      // 실패 시에도 토큰 상태와 헤더는 정리
       setToken(null);
       delete axios.defaults.headers.common['Authorization'];
     } finally {
-      setIsLoading(false); // 로딩 상태 해제
+      setIsLoading(false);
     }
-  }, [token, pathname]); // token과 pathname에 의존
+  }, [token, pathname, router, setIsLoading, setToken]);
 
-  // 로그인 처리 함수 (토큰 저장 및 상태 업데이트)
+  // 로그인 처리 함수
   const performLogin = useCallback(async (newAccessToken: string, newRefreshToken?: string, options?: { preventRedirect?: boolean }) => {
+    console.log('DEBUG: performLogin called with newAccessToken:', newAccessToken);
+    console.log('DEBUG: performLogin called with newRefreshToken:', newRefreshToken);
+
     setIsLoading(true);
     try {
       await SecureStore.setItemAsync(TOKEN_KEY, newAccessToken);
-      if (newRefreshToken) {
+      if (newRefreshToken && typeof newRefreshToken === 'string' && newRefreshToken.length > 0) {
         await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, newRefreshToken);
         console.log('AuthContext: Access Token and Refresh Token saved.');
       } else {
-        console.log('AuthContext: Access Token saved. Refresh Token was not explicitly updated.');
+        console.log('AuthContext: Access Token saved. Refresh Token was not explicitly updated or was invalid.');
+        if (newRefreshToken === '') console.warn('AuthContext: Received an empty string for newRefreshToken.');
+        if (newRefreshToken === null) console.warn('AuthContext: Received null for newRefreshToken.');
+        if (newRefreshToken === undefined) console.warn('AuthContext: Received undefined for newRefreshToken.');
       }
-      setToken(newAccessToken); // Context 상태 업데이트
-      axios.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`; // Axios 헤더 설정
+      setToken(newAccessToken);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
       console.log('AuthContext: Token updated. Axios header set.');
 
-      if (!options?.preventRedirect) { // preventRedirect 옵션이 true가 아니면 리다이렉트
-        router.replace('/(tabs)'); // 메인 화면(탭)으로 리다이렉트
+      if (!options?.preventRedirect) {
+        router.replace('/(tabs)');
       }
     } catch (e) {
       console.error('AuthContext: Failed to save tokens or login', e);
     } finally {
-      setIsLoading(false); // 로딩 상태 해제
+      setIsLoading(false);
     }
-  }, []); // 이 함수는 내부 상태 setter에만 의존하므로 의존성 배열 비워도 무방
+  }, [setIsLoading, setToken, router]);
 
-  // 앱 초기 실행 시 저장된 토큰 로드 (마운트 시 1회 실행)
+  // 앱 초기 실행 시 저장된 토큰 로드
   useEffect(() => {
     const loadTokenFromStorage = async () => {
       console.log('AuthContext: loadTokenFromStorage attempting to run.');
@@ -123,13 +129,19 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
         const storedAccessToken = await SecureStore.getItemAsync(TOKEN_KEY);
         const storedRefreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
 
+        console.log('AuthContext Init Load - storedAccessToken:', storedAccessToken);
+        console.log('AuthContext Init Load - storedRefreshToken:', storedRefreshToken);
+
         if (storedAccessToken && storedRefreshToken) {
           setToken(storedAccessToken);
           axios.defaults.headers.common['Authorization'] = `Bearer ${storedAccessToken}`;
           console.log('AuthContext: Access Token and Refresh Token loaded on init. Axios header set.');
         } else if (storedAccessToken && !storedRefreshToken) {
-          console.warn('AuthContext: Access Token found on init, but Refresh Token is missing. Logging out.');
-          await performLogout({ suppressRedirect: true }); // 리다이렉트 없이 로그아웃 처리
+          console.warn('AuthContext: Access Token found on init, but Refresh Token is missing. Logging out and clearing tokens.');
+          setToken(null);
+          delete axios.defaults.headers.common['Authorization'];
+          await SecureStore.deleteItemAsync(TOKEN_KEY);
+          await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
         } else {
           console.log('AuthContext: No Access Token found on init. Ensuring logout state.');
           delete axios.defaults.headers.common['Authorization'];
@@ -152,97 +164,138 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     };
 
     loadTokenFromStorage();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // 의존성 배열을 빈 배열로 설정하여 마운트 시에만 실행
+  }, []); // 의존성 배열을 빈 배열로 유지하여 마운트 시 1회 실행
 
-  // Axios 인터셉터 설정 (토큰 자동 재발급 로직)
+  // Axios 인터셉터 설정
   useEffect(() => {
-    globalLogoutHandlerForInterceptor = performLogout; // 인터셉터용 로그아웃 함수 연결
+    globalLogoutHandlerForInterceptor = performLogout;
 
     const responseInterceptor = axios.interceptors.response.use(
-      (response) => response, // 성공 응답은 그대로 통과
-      async (error: AxiosError) => { // 에러 응답 처리
+      (response) => response,
+      async (error: AxiosError) => {
         const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean };
 
-        // 401 에러이고, 재발급 요청 자체가 아니며, 이미 재시도한 요청이 아닐 경우
         if (error.response?.status === 401 && originalRequest && originalRequest.url !== `${API_BASE_URL}${API_ENDPOINTS.REFRESH_TOKEN}` && !originalRequest._retry) {
-          
-          if (isCurrentlyRefreshing) { // 이미 다른 요청이 토큰 재발급 중인 경우
+          if (isCurrentlyRefreshing) {
             return new Promise((resolve) => {
-              addRefreshSubscriber((newAccessToken: string) => { // 재발급 완료 후 실행될 콜백 등록
+              addRefreshSubscriber((newAccessToken: string) => {
                 if (originalRequest.headers) {
                   originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`;
                 }
-                resolve(axios(originalRequest)); // 원래 요청 재시도
+                resolve(axios(originalRequest));
               });
             });
           }
 
-          originalRequest._retry = true; // 재시도 플래그 설정 (무한 재발급 방지)
-          isCurrentlyRefreshing = true;  // 토큰 재발급 시작 플래그
+          originalRequest._retry = true;
+          isCurrentlyRefreshing = true;
 
           try {
             const storedRefreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-            if (!storedRefreshToken) { // 저장된 Refresh Token이 없으면 로그아웃
-              if (globalLogoutHandlerForInterceptor) await globalLogoutHandlerForInterceptor({ suppressRedirect: true });
+            if (!storedRefreshToken) {
+              console.warn('Interceptor: No refresh token found. Logging out.');
+              // ▼▼▼ Alert 추가 및 로그아웃 처리 (사용자 확인 후) ▼▼▼
+              Alert.alert(
+                "세션 오류",
+                "로그인 정보가 유효하지 않습니다. 다시 로그인해주세요.",
+                [
+                  {
+                    text: "확인",
+                    onPress: async () => {
+                      if (globalLogoutHandlerForInterceptor) {
+                        await globalLogoutHandlerForInterceptor({ suppressRedirect: false });
+                      }
+                    }
+                  }
+                ],
+                { cancelable: false }
+              );
+              // ▲▲▲ Alert 추가 ▲▲▲
               isCurrentlyRefreshing = false;
               return Promise.reject(error);
             }
 
             console.log('Interceptor: Attempting to refresh token.');
-            // 토큰 재발급 API 호출
             const refreshResponse = await axios.post(
               `${API_BASE_URL}${API_ENDPOINTS.REFRESH_TOKEN}`,
               { refreshToken: storedRefreshToken },
-              { headers: { 'Authorization': '' } } // 재발급 요청 시에는 만료된 토큰 전송 방지
+              { headers: { 'Authorization': '' } }
             );
 
             const newAccessToken = refreshResponse.data.accessToken;
-            const newRefreshTokenFromResponse = refreshResponse.data.refreshToken; // 백엔드가 새 Refresh Token을 반환할 수 있음
+            const newRefreshTokenFromResponse = refreshResponse.data.refreshToken;
 
-            if (!newAccessToken) { // 새 Access Token이 없으면 로그아웃
-                if (globalLogoutHandlerForInterceptor) await globalLogoutHandlerForInterceptor({ suppressRedirect: true });
-                isCurrentlyRefreshing = false;
-                return Promise.reject(error);
+            if (!newAccessToken) {
+              console.warn('Interceptor: Failed to get new access token from refresh response. Logging out.');
+              // ▼▼▼ Alert 추가 및 로그아웃 처리 (사용자 확인 후) ▼▼▼
+              Alert.alert(
+                "세션 갱신 실패",
+                "세션 갱신에 실패했습니다. 다시 로그인해주세요.",
+                [
+                  {
+                    text: "확인",
+                    onPress: async () => {
+                      if (globalLogoutHandlerForInterceptor) {
+                        await globalLogoutHandlerForInterceptor({ suppressRedirect: false });
+                      }
+                    }
+                  }
+                ],
+                { cancelable: false }
+              );
+              // ▲▲▲ Alert 추가 ▲▲▲
+              isCurrentlyRefreshing = false;
+              return Promise.reject(error);
             }
-            
-            // 새 토큰 정보로 Context와 저장소 업데이트 (리다이렉트 없이)
-            await performLogin(newAccessToken, newRefreshTokenFromResponse, { preventRedirect: true });
-            
-            console.log('Interceptor: Token refreshed successfully.');
-            isCurrentlyRefreshing = false; // 토큰 재발급 완료 플래그
-            onTokenRefreshed(newAccessToken); // 대기 중이던 요청들에게 새 토큰 전파
 
-            // 원래 실패했던 요청을 새 토큰으로 재시도
+            await performLogin(newAccessToken, newRefreshTokenFromResponse, { preventRedirect: true });
+
+            console.log('Interceptor: Token refreshed successfully.');
+            isCurrentlyRefreshing = false;
+            onTokenRefreshed(newAccessToken);
+
             if (originalRequest.headers) {
               originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`;
             }
             return axios(originalRequest);
 
-          } catch (refreshError: any) { // 토큰 재발급 실패 시
+          } catch (refreshError: any) {
             console.error('Interceptor: Token refresh API call failed.', refreshError.response?.data || refreshError.message);
-            if (globalLogoutHandlerForInterceptor) await globalLogoutHandlerForInterceptor({ suppressRedirect: true }); // 로그아웃 처리
+            // ▼▼▼ Alert 추가 및 로그아웃 처리 (사용자 확인 후) ▼▼▼
+            Alert.alert(
+              "세션 만료",
+              "세션이 만료되었습니다. 다시 로그인해주세요.",
+              [
+                {
+                  text: "확인",
+                  onPress: async () => {
+                    if (globalLogoutHandlerForInterceptor) {
+                      await globalLogoutHandlerForInterceptor({ suppressRedirect: false });
+                    }
+                  }
+                }
+              ],
+              { cancelable: false }
+            );
+            // ▲▲▲ Alert 추가 ▲▲▲
             isCurrentlyRefreshing = false;
-            onTokenRefreshed(''); // 실패했음을 알림 (또는 오류 전파)
-            return Promise.reject(error); 
+            onTokenRefreshed('');
+            return Promise.reject(error);
           }
-        } else if (error.response?.status === 403) { // 403 Forbidden 에러 처리
+        } else if (error.response?.status === 403) {
             console.warn(`Axios Interceptor: Status 403 (Forbidden) for ${originalRequest?.url}. User may lack permissions.`);
-            // 필요시 추가적인 사용자 알림 또는 처리 로직
         }
 
-        return Promise.reject(error); // 그 외 에러는 그대로 반환
+        return Promise.reject(error);
       }
     );
 
-    // 컴포넌트 언마운트 시 인터셉터 제거
     return () => {
       axios.interceptors.response.eject(responseInterceptor);
       globalLogoutHandlerForInterceptor = null;
     };
-  }, [performLogin, performLogout]); // performLogin, performLogout 함수가 변경될 때 인터셉터 재설정
+  }, [performLogin, performLogout]);
 
-  // AuthContext.Provider로 하위 컴포넌트에 값들 제공
   return (
     <AuthContext.Provider value={{ token, isAuthenticated: !!token, isLoading, login: performLogin, logout: performLogout }}>
       {children}
@@ -250,7 +303,6 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   );
 };
 
-// useAuth 커스텀 훅
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
